@@ -368,6 +368,37 @@ describe("native child retry lifecycle", () => {
     }
   });
 
+  it.each([
+    "server_busy",
+    "servers are currently busy",
+    "Selected model is at capacity",
+    "The pending stream has been canceled",
+  ])("preserves single retry ownership for Pi 1.1 transient error: %s", async errorMessage => {
+    for (const childRetryEnabled of [true, false]) {
+      const harness = await createChildHarness([
+        fauxAssistantMessage("transient failure", { stopReason: "error", errorMessage }),
+        fauxAssistantMessage("recovered once"),
+      ], 0, { nativeRetryEnabled: true, childRetryEnabled });
+      try {
+        const nativeRetries: unknown[] = [];
+        const settled: Array<{ aborted: boolean }> = [];
+        harness.session.subscribe(event => {
+          if (event.type === "auto_retry_start") nativeRetries.push(event);
+          if (event.type === "agent_settled") settled.push(event);
+        });
+        await harness.session.prompt("Recover with exactly one scheduler.");
+        expect(harness.faux.state.callCount).toBe(2);
+        expect(harness.session.getLastAssistantText()).toBe("recovered once");
+        expect(nativeRetries).toHaveLength(childRetryEnabled ? 0 : 1);
+        expect(harness.session.messages.filter(message => message.role === "custom")).toHaveLength(childRetryEnabled ? 1 : 0);
+        expect(settled).toHaveLength(1);
+        expect(settled[0]?.aborted).toBe(false);
+      } finally {
+        await harness.close();
+      }
+    }
+  });
+
   // User-configured OR rules, arbitrary markers, and flags select inline recovery.
   it("selects inline recovery from an arbitrary configured system prompt rule", async () => {
     const harness = await createChildHarness(
@@ -809,6 +840,10 @@ describe("native child retry risk coverage", () => {
       { childRetryConfig: { baseDelayMs: 250, maxDelayMs: 250 } },
     );
     try {
+      const settledEvents: Array<{ aborted: boolean }> = [];
+      harness.session.subscribe(event => {
+        if (event.type === "agent_settled") settledEvents.push(event);
+      });
       const promptPromise = harness.session.prompt("Abort during retry backoff.");
       await harness.waitForFirstError();
       const settled = await Promise.race([
@@ -820,6 +855,8 @@ describe("native child retry risk coverage", () => {
       await promptPromise;
       await new Promise(resolve => setTimeout(resolve, 300));
       expect(harness.faux.state.callCount).toBe(1);
+      expect(settledEvents).toHaveLength(1);
+      expect(settledEvents[0]?.aborted).toBe(true);
     } finally {
       await harness.close();
     }
