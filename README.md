@@ -386,6 +386,12 @@ Semantics:
 - A matching rule with `enabled: false` leaves pi's native retry scheduler
   untouched; a missing, empty, malformed, or nonmatching configuration keeps
   the ordinary `pi-retry` takeover.
+- Unmatched sessions in print or JSON mode (`pi -p`, `pi --mode json`, and SDK
+  hosts that bind extensions without a mode, such as pi-subagents children)
+  retry inline with the top-level policy, inside the original prompt. These
+  hosts read the result as soon as `prompt()` settles, so a detached retry
+  would arrive too late. A matcher is only needed for a different child policy
+  or for `enabled: false`.
 - Patterns are compiled when settings resolve. Invalid syntax, unsupported or
   duplicate flags, and malformed groups warn and become no-match instead of
   matching everything.
@@ -395,4 +401,5 @@ the parent.
 
 The example pattern above matches the `<active_agent name="…"/>` line that
 `pi-subagents` prefixes to native child system prompts; substitute your own
-marker if you select child sessions differently.
+marker if you select child sessions differently. Keep the `m` flag: some
+children have a `<sub_agent_context>` block before that line.
