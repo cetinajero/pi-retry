@@ -32,6 +32,7 @@ import {
   getSessionAgent,
   installRetrySdkHooks,
   registerRetrySession,
+  supportsSettleBoundary,
   unregisterRetrySession,
 } from "./src/session-registry.js";
 
@@ -79,7 +80,8 @@ const sdkHooksSupported = installRetrySdkHooks();
  */
 
 // The remaining module state is used only by the currently bound ordinary
-// session. Child sessions and prompt-scoped (print/JSON) sessions use
+// session. Child sessions, prompt-scoped (print/JSON) sessions, and sessions
+// with message-free retries use
 // ChildRetryController instances registered by their own session manager, so
 // their activity cannot reset or drive this state.
 
@@ -108,6 +110,10 @@ let _retryLifecycleId = 0;
 
 // Generation counter for ordinary session replacement.
 let _sessionGeneration = 0;
+
+// Warn once per load when message-free retries are requested on an SDK
+// without the settle boundary; those sessions keep hidden retry messages.
+let _warnedMessageFreeUnsupported = false;
 
 let _terminalInputUnsubscribe: (() => void) | null = null;
 
@@ -293,12 +299,23 @@ export default function (pi: ExtensionAPI) {
       systemPrompt ?? readEffectiveSystemPrompt(ctx),
       settings.subagents.match.systemPromptRegex,
     );
+    const policy = child ? settings.subagents : settings.main;
+    const boundarySupported = supportsSettleBoundary();
+    if (policy.messageFreeRetries && !boundarySupported && !_warnedMessageFreeUnsupported) {
+      _warnedMessageFreeUnsupported = true;
+      console.warn(
+        "[pi-retry] piRetry.messageFreeRetries needs Pi's agent_before_settle boundary; using hidden retry messages.",
+      );
+    }
+    const messageFree = policy.messageFreeRetries && boundarySupported;
     // An unmatched session in a prompt-scoped mode keeps the ordinary policy
     // but uses the inline controller: its host consumes the result when
     // prompt() settles, so a detached retry would never be observed.
     const promptScoped = !child && isPromptScopedMode(ctx.mode);
-    const inline = child || promptScoped;
-    const inlineEnabled = promptScoped || (child && settings.subagents.enabled);
+    // Message-free retries continue the active run, so an opted-in ordinary
+    // session also uses the inline controller instead of the detached loop.
+    const inline = child || promptScoped || messageFree;
+    const inlineEnabled = child ? settings.subagents.enabled : promptScoped || messageFree;
     const registered = registerRetrySession(sessionManager, owner, {
       isChild: inline,
       suppressNativeRetry: !child || settings.subagents.enabled,
@@ -307,10 +324,10 @@ export default function (pi: ExtensionAPI) {
     if (!registered || !registered.owned) return registered?.binding;
 
     const binding = registered.binding;
-    const policy = child ? "subagents" : "main";
+    const policyName = child ? "subagents" : "main";
     const existing = inlineEnabled ? childControllerFor(sessionManager) : undefined;
     // Keep an existing controller (and its counters) only for the same policy.
-    if (!existing || controllerPolicies.get(existing) !== policy) {
+    if (!existing || controllerPolicies.get(existing) !== policyName) {
       if (binding.sessionState && typeof (binding.sessionState as ChildRetryController).close === "function") {
         (binding.sessionState as ChildRetryController).close();
       }
@@ -320,10 +337,10 @@ export default function (pi: ExtensionAPI) {
           pi,
           binding.agent,
           child
-            ? settings.subagents
-            : { ...settings.main, enabled: true, match: { systemPromptRegex: [] } },
+            ? { ...settings.subagents, messageFreeRetries: messageFree }
+            : { ...settings.main, messageFreeRetries: messageFree, enabled: true, match: { systemPromptRegex: [] } },
         );
-        controllerPolicies.set(controller, policy);
+        controllerPolicies.set(controller, policyName);
         binding.sessionState = controller;
       }
     }
@@ -353,6 +370,13 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("before_agent_start", (event, ctx) => {
     configureSession(ctx, event.systemPrompt);
+  });
+
+  // An armed message-free retry omits the failed response and continues here.
+  pi.on("agent_before_settle", (event, ctx) => {
+    const binding = getRetrySession(ctx.sessionManager);
+    if (!binding || binding.owner !== owner || !binding.isChild) return undefined;
+    return childControllerFor(ctx.sessionManager)?.handleBeforeSettle(event);
   });
 
   pi.on("input", (_event, ctx) => {
