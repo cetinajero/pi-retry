@@ -630,22 +630,23 @@ export default function (pi: ExtensionAPI) {
     description: "Unified retry controls: /retry (manual trigger), /retry status (diagnostics), /retry reset (clear state)",
     handler: async (args, ctx) => {
       const binding = getRetrySession(ctx.sessionManager);
-      if (binding && binding.owner !== owner) return;
+      const subcommand = args[0]?.toLowerCase();
+      const bindOwnerMismatch = !!binding && binding.owner !== owner;
+      if (bindOwnerMismatch && subcommand !== "status" && subcommand !== "reset") return;
       if (binding?.isChild) {
         const controller = childControllerFor(ctx.sessionManager);
         if (!controller) {
           ctx.ui.notify("Child-session retry takeover is disabled.", "info");
           return;
         }
-        const childSubcommand = args[0]?.toLowerCase();
-        if (childSubcommand === "status") {
+        if (subcommand === "status") {
           ctx.ui.notify(
             `Child retry status:\n${JSON.stringify(controller.status(), null, 2)}`,
             "info",
           );
           return;
         }
-        if (childSubcommand === "reset") {
+        if (subcommand === "reset") {
           controller.reset();
           ctx.ui.notify("Child retry counters reset", "info");
           return;
@@ -654,7 +655,6 @@ export default function (pi: ExtensionAPI) {
         await controller.retryManually(ctx);
         return;
       }
-      const subcommand = args[0]?.toLowerCase();
 
       // /retry status - Show diagnostics
       if (subcommand === "status") {

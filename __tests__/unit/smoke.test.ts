@@ -771,6 +771,45 @@ describe("smoke: /retry command", () => {
       restore();
     }
   });
+
+  it("/retry status and /retry reset still work when a stale owner binding exists", async () => {
+    const { commands, restore, sessionManager } = await setup();
+    try {
+      const retryHandler = commands["retry"]?.handler;
+      expect(retryHandler).toBeDefined();
+
+      const staleOwner = {};
+      const agent = await createAgentWithMessages([
+        { role: "assistant", stopReason: "error", errorMessage: "Connection error", content: [] },
+      ]);
+      recordRetrySessionAgent(sessionManager, agent as any);
+      registerRetrySession(sessionManager, staleOwner, {
+        isChild: false,
+        suppressNativeRetry: true,
+        childRetryEnabled: false,
+      });
+
+      const ctx = createMockCtx([
+        { type: "message", message: { role: "assistant", stopReason: "stop", content: [] } },
+      ]);
+
+      await retryHandler!(["status"], ctx);
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("=== Retry Status ==="),
+        "info",
+      );
+
+      await retryHandler!(["reset"], ctx);
+      expect(ctx.ui.notify).toHaveBeenCalledWith(
+        expect.stringContaining("All retry counters reset"),
+        "info",
+      );
+
+      unregisterRetrySession(sessionManager, staleOwner);
+    } finally {
+      restore();
+    }
+  });
 });
 
 // ── Critical: built-in retry suppression ──
