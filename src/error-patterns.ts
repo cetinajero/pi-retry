@@ -384,10 +384,16 @@ export function isNonRetryableError(message: AgentMessage): boolean {
  * so a mid-session top-up auto-resumes.
  */
 function isTransient429RateLimit(message: string): boolean {
-  const transient429Signal = /(?:\b429\b|too many requests|rate limit|rate_limited|retry after)/i.test(message);
+  const transient429Signal = /(?:\b429\b|too many requests|rate limit|rate_limited|retry after|resource_exhausted)/i.test(message);
   if (!transient429Signal) return false;
-  const transientRetryWindow = /(?:RetryInfo|retryDelay|Please retry in|retry in \d|per minute limit exceeded|per-minute limit exceeded|Free Tier.*limit exceeded|free tier.*limit exceeded|retryable|try again later)/i.test(message);
-  return transientRetryWindow || /(?:quota.*per minute|limit exceeded on Free Tier|generate content input tokens per minute)/i.test(message);
+
+  // If the provider explicitly tells us when to retry (RetryInfo / retryDelay /
+  // "Please retry in ..."), then it is a transient rate-limit/quota window even
+  // when the quota is daily or free-tier based. The caller should back off and
+  // retry later instead of treating the condition as permanent.
+  const transientRetryWindow = /(?:RetryInfo|retryDelay|Please retry in|retry in \d|retry in \d+h|retry in \d+m|retry in \d+s|per minute limit exceeded|per-minute limit exceeded|per day limit exceeded|per-day limit exceeded|Free Tier.*limit exceeded|free tier.*limit exceeded|retryable|try again later)/i.test(message);
+
+  return transientRetryWindow || /(?:quota.*per minute|quota.*per day|limit exceeded on Free Tier|generate content input tokens per minute|generate content requests per day)/i.test(message);
 }
 
 export function hasQuotaExhaustedError(message: AgentMessage): boolean {
