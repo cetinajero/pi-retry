@@ -229,9 +229,19 @@ export function isAssistantMessage(message: AgentMessage): message is Extract<Ag
 function unwrapEmbeddedJsonString(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return value;
-  let candidate = trimmed;
-  let depth = 0;
-  while ((candidate.startsWith("{") || candidate.startsWith("[")) && depth < 4) {
+
+  const candidatePool = new Set<string>();
+  candidatePool.add(trimmed);
+
+  const firstObject = trimmed.search(/[\[{]/);
+  if (firstObject >= 0) {
+    const fromJson = trimmed.slice(firstObject);
+    candidatePool.add(fromJson);
+    const lastObject = Math.max(fromJson.lastIndexOf("}"), fromJson.lastIndexOf("]"));
+    if (lastObject > 0) candidatePool.add(fromJson.slice(0, lastObject + 1));
+  }
+
+  for (const candidate of candidatePool) {
     try {
       const parsed = JSON.parse(candidate);
       if (parsed && typeof parsed === "object") {
@@ -250,14 +260,12 @@ function unwrapEmbeddedJsonString(value: string): string {
         const flattened = flatten(parsed).filter(Boolean);
         if (flattened.length > 0) return flattened.join("\n");
       }
-      break;
     } catch {
-      break;
+      // Continue trying the next slice candidate.
     }
-    depth++;
-    break;
   }
-  return candidate;
+
+  return trimmed;
 }
 
 function getErrorText(message: AgentMessage): string | undefined {
