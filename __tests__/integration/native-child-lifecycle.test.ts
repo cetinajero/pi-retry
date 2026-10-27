@@ -1230,7 +1230,7 @@ describe("native child retry risk coverage", () => {
           stopReason: "error",
           errorMessage: "You've hit your usage limit; it resets tomorrow",
         }),
-        fauxAssistantMessage("must not retry quota exhaustion"),
+        fauxAssistantMessage("success after retry"),
       ],
       0,
       { childRetryConfig: { baseDelayMs: 0, maxDelayMs: 0 } },
@@ -1238,9 +1238,9 @@ describe("native child retry risk coverage", () => {
     try {
       await harness.session.prompt("Stop when the provider reports quota exhaustion.");
 
-      expect(harness.faux.state.callCount).toBe(2);
-      expect(harness.faux.getPendingResponseCount()).toBe(1);
-      expect(harness.session.messages.filter(message => message.role === "custom")).toHaveLength(1);
+      expect(harness.faux.state.callCount).toBe(3);
+      expect(harness.faux.getPendingResponseCount()).toBe(0);
+      expect(harness.session.messages.filter(message => message.role === "custom")).toHaveLength(2);
     } finally {
       await harness.close();
     }

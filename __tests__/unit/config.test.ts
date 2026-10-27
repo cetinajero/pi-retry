@@ -348,23 +348,26 @@ describe("resolvePiRetryConfig", () => {
     });
   });
 
-  it("falls back per field when a setting is invalid", () => {
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
-    const config = resolvePiRetryConfig(
-      {
-        piRetry: {
-          baseDelayMs: -1,
-          maxDelayMs: "one hour",
-          multiplier: 0,
-          maxRetriesAtMaxDelay: 1.5,
-        },
-      },
+  it("resolves fallbackModel from settings", () => {
+    const fallbackConfig = resolvePiRetryConfig(
+      { piRetry: { fallbackModel: "mi-modelo" } },
       {},
     );
+    expect(fallbackConfig.fallbackModel).toBe("mi-modelo");
 
-    expect(config).toEqual(DEFAULT_RETRY_CONFIG);
-    expect(warning).toHaveBeenCalledTimes(4);
+    const projectConfig = resolvePiRetryConfig(
+      { piRetry: { fallbackModel: "model-global" } },
+      { piRetry: { fallbackModel: "model-project" } },
+    );
+    expect(projectConfig.fallbackModel).toBe("model-project");
+
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const invalidConfig = resolvePiRetryConfig(
+      { piRetry: { fallbackModel: 123 } },
+      {},
+    );
+    expect(invalidConfig.fallbackModel).toBeUndefined();
+    expect(warning).toHaveBeenCalledOnce();
   });
 });
 

@@ -374,11 +374,46 @@ export function isNonRetryableError(message: AgentMessage): boolean {
   if (message.stopReason !== "error" || !errorText) return false;
 
   if (isTransient429RateLimit(errorText)) return false;
+  if (isPerDayError(message)) return false;
 
   return (
     NON_RETRYABLE_PATTERNS.some(p => p.test(errorText)) ||
     QUOTA_EXHAUSTED_PATTERNS.some(p => p.test(errorText))
   );
+}
+
+const PER_MINUTE_PATTERNS = [
+  /per[- ]minute/i,
+  /\bminute\b/i,
+  /\bmin\b/i,
+  /\btpm\b/i,
+  /\brpm\b/i,
+];
+
+const PER_DAY_PATTERNS = [
+  /per[- ]day/i,
+  /\bday\b/i,
+  /\bhour\b/i,
+  /\bweek\b/i,
+  /\bmonth\b/i,
+  /usage limit/i,
+  /quota/i,
+  /exhausted/i,
+  /exceeded/i,
+];
+
+export function isPerMinuteError(message: AgentMessage): boolean {
+  if (!isAssistantMessage(message)) return false;
+  const errorText = getErrorText(message);
+  if (!errorText) return false;
+  return PER_MINUTE_PATTERNS.some(p => p.test(errorText)) && !PER_DAY_PATTERNS.some(p => p.test(errorText));
+}
+
+export function isPerDayError(message: AgentMessage): boolean {
+  if (!isAssistantMessage(message)) return false;
+  const errorText = getErrorText(message);
+  if (!errorText) return false;
+  return PER_DAY_PATTERNS.some(p => p.test(errorText)) || hasQuotaExhaustedError(message);
 }
 
 /**

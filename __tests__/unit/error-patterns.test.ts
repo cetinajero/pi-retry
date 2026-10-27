@@ -497,18 +497,18 @@ describe('hasQuotaExhaustedError', () => {
   });
 });
 
-describe('quota errors are not retried', () => {
+describe('quota / per-day errors are retryable', () => {
   const createAssistantError = (errorMessage: string): AgentMessage =>
     ({ role: 'assistant', stopReason: 'error', errorMessage, content: [] } as unknown as AgentMessage);
 
-  it('hasRetryableError returns false for quota errors', () => {
-    expect(hasRetryableError(createAssistantError("You've hit your limit · resets 4pm"))).toBe(false);
-    expect(hasRetryableError(createAssistantError('out of budget'))).toBe(false);
+  it('hasRetryableError returns true for quota / per-day errors', () => {
+    expect(hasRetryableError(createAssistantError("You've hit your limit · resets 4pm"))).toBe(true);
+    expect(hasRetryableError(createAssistantError('out of budget'))).toBe(true);
   });
 
-  it('isNonRetryableError returns true for quota errors', () => {
-    expect(isNonRetryableError(createAssistantError("You've hit your usage limit. Upgrade to Plus"))).toBe(true);
-    expect(isNonRetryableError(createAssistantError('Budget has been exceeded! Current cost: 0.5, Max budget: 0.4'))).toBe(true);
+  it('isNonRetryableError returns false for quota / per-day errors', () => {
+    expect(isNonRetryableError(createAssistantError("You've hit your usage limit. Upgrade to Plus"))).toBe(false);
+    expect(isNonRetryableError(createAssistantError('Budget has been exceeded! Current cost: 0.5, Max budget: 0.4'))).toBe(false);
   });
 
   it('getErrorCategory returns quota (checked before builtin rate-limit)', () => {
@@ -593,7 +593,7 @@ describe('nested 429/provider payloads are retryable', () => {
     expect(hasQuotaExhaustedError(msg)).toBe(false);
   });
 
-  it('keeps nested 429 quota wording from being treated as permanent quota exhaustion unless it has a hard reset cap', () => {
+  it('keeps nested 429 quota wording retryable as per-day / quota errors', () => {
     const msg = {
       role: 'assistant',
       stopReason: 'error',
@@ -602,7 +602,7 @@ describe('nested 429/provider payloads are retryable', () => {
     } as unknown as AgentMessage;
 
     expect(hasQuotaExhaustedError(msg)).toBe(true);
-    expect(hasRetryableError(msg)).toBe(false);
+    expect(hasRetryableError(msg)).toBe(true);
   });
 
   it('treats retryable Gemini free-tier minute limit as transient 429 instead of permanent quota exhaustion', () => {

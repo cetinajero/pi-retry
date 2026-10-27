@@ -21,6 +21,8 @@ import {
   formatDuration,
   formatRetryCountdown,
   getErrorCategory,
+  isPerMinuteError,
+  isPerDayError,
   RETRY_STATUS_KEY,
   RetryState,
   ContinuationState,
@@ -627,7 +629,7 @@ export default function (pi: ExtensionAPI) {
 
   // Unified /retry command with subcommands
   pi.registerCommand("retry", {
-    description: "Unified retry controls: /retry (manual trigger), /retry status (diagnostics), /retry reset (clear state)",
+    description: "Unified retry controls: /retry (manual trigger), /retry status (diagnostics), /retry reset (clear state), /retry fallback-model <model>",
     handler: async (args, ctx) => {
       const binding = getRetrySession(ctx.sessionManager);
       const subcommand = args[0]?.toLowerCase();
@@ -653,6 +655,28 @@ export default function (pi: ExtensionAPI) {
         }
         // A manual child command starts a fresh lifecycle, even after automatic cap exhaustion.
         await controller.retryManually(ctx);
+        return;
+      }
+
+      // /retry fallback-model [<model>|clear]
+      if (subcommand === "fallback-model") {
+        const modelArg = args.slice(1).join(" ").trim();
+        if (modelArg) {
+          if (modelArg.toLowerCase() === "clear" || modelArg.toLowerCase() === "none") {
+            retryConfig.fallbackModel = undefined;
+            ctx.ui.notify("Fallback model cleared", "info");
+          } else {
+            retryConfig.fallbackModel = modelArg;
+            ctx.ui.notify(`Fallback model set to: ${modelArg}`, "info");
+          }
+        } else {
+          ctx.ui.notify(
+            retryConfig.fallbackModel
+              ? `Current fallback model: ${retryConfig.fallbackModel}\nUse /retry fallback-model <model> to change, or /retry fallback-model clear to remove.`
+              : "No fallback model defined. Use /retry fallback-model <model>",
+            "info",
+          );
+        }
         return;
       }
 
@@ -698,6 +722,10 @@ export default function (pi: ExtensionAPI) {
         status += `  Continuations used: ${stateEmptyStop.getCount()}\n`;
         status += `  Is continuing: ${stateEmptyStop.getIsContinuing()}\n`;
         status += `  Cap: ${MAX_EMPTY_CONTINUATIONS} nudge(s), then give up\n\n`;
+
+        // Fallback model state
+        status += "Fallback Model:\n";
+        status += `  Configured model: ${retryConfig.fallbackModel || "None"}\n\n`;
 
         // Config
         status += "Configuration:\n";
@@ -927,6 +955,27 @@ export default function (pi: ExtensionAPI) {
   // SessionManager projection; older SDKs use the live Agent-state fallback.
   // TEST:__tests__/unit/user-retry-regression.test.ts[reported retry regressions]
   /**
+   * Resolve fallback model name/ID to a Model object.
+   */
+  function resolveFallbackModel(modelStr: string, modelRuntime: any): any {
+    if (!modelStr || !modelRuntime) return undefined;
+    const parts = modelStr.split(/[/:]/);
+    if (parts.length >= 2) {
+      const providerId = parts[0].trim();
+      const modelId = parts.slice(1).join("/").trim();
+      const model = modelRuntime.getModel(providerId, modelId);
+      if (model) return model;
+    }
+    const allModels = modelRuntime.getModels();
+    for (const m of allModels) {
+      if (m.id === modelStr || m.name?.toLowerCase() === modelStr.toLowerCase()) {
+        return m;
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * Drive hidden retry and continuation turns for one session.
    *
    * @param initialKind Hidden turn kind selected by the event or command.
@@ -1018,6 +1067,26 @@ export default function (pi: ExtensionAPI) {
             ? (sessionManager as { getEntries: () => unknown[] }).getEntries()
             : [])?.errorMessage ?? "")
           : undefined;
+
+        if (hiddenTurnKind === "retry" && retryConfig.fallbackModel) {
+          const lastMsg = getLastAssistantMessage(sessionManager && typeof (sessionManager as { getEntries?: () => unknown[] }).getEntries === "function"
+            ? (sessionManager as { getEntries: () => unknown[] }).getEntries()
+            : myAgent.state.messages);
+          if (lastMsg && isPerDayError(lastMsg) && !isPerMinuteError(lastMsg)) {
+            const record = sessionManager && typeof sessionManager === "object"
+              ? (globalThis as any)[Symbol.for("pi-retry.session-registry.v1")]?.records.get(sessionManager)
+              : undefined;
+            if (record?.session && typeof record.session.setModel === "function" && typeof record.session.modelRuntime === "object") {
+              const resolvedModel = resolveFallbackModel(retryConfig.fallbackModel, record.session.modelRuntime);
+              if (resolvedModel) {
+                try {
+                  await record.session.setModel(resolvedModel);
+                  notifySafely(`Per-day error detected. Switched to fallback model: ${retryConfig.fallbackModel}`, "info");
+                } catch {}
+              }
+            }
+          }
+        }
 
         removeErrorFromRetryContext(sessionManager, myAgent);
 

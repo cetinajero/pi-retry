@@ -21,6 +21,8 @@ export interface PiRetryConfig extends BackoffConfig {
    * request, instead of queueing a hidden retry message. Opt-in.
    */
   messageFreeRetries: boolean;
+  /** Optional fallback model to use. */
+  fallbackModel?: string;
 }
 
 /**
@@ -39,6 +41,8 @@ export interface PiRetrySubagentsOverride {
   maxRetriesAtMaxDelay?: number;
   /** Child override for message-free error retries. */
   messageFreeRetries?: boolean;
+  /** Child override for fallback model. */
+  fallbackModel?: string;
   /** Optional policy-selection rules for effective system prompts. */
   match?: {
     /** User-provided regex rules compiled during settings resolution. */
@@ -82,6 +86,7 @@ export const DEFAULT_RETRY_CONFIG: PiRetryConfig = {
   ...DEFAULT_BACKOFF_CONFIG,
   maxRetriesAtMaxDelay: 3,
   messageFreeRetries: false,
+  fallbackModel: undefined,
 };
 
 /** Root settings key owned by this extension. */
@@ -148,6 +153,33 @@ function readBooleanSetting(
   const value = settings[key];
   if (value === undefined) return fallback;
   if (typeof value === "boolean") return value;
+  console.warn(
+    `[pi-retry] Ignoring invalid ${displayKey} value: ${String(value)}`,
+  );
+  return fallback;
+}
+
+/**
+ * Read one string setting and fall back when it fails validation.
+ *
+ * @param settings Settings namespace to inspect.
+ * @param key Setting name to read.
+ * @param fallback Default or inherited value.
+ * @param displayKey User-facing setting path used in warnings.
+ * @returns A validated string or undefined.
+ */
+function readStringSetting(
+  settings: SettingsObject,
+  key: string,
+  fallback: string | undefined,
+  displayKey = `${PI_RETRY_SETTINGS_KEY}.${key}`,
+): string | undefined {
+  const value = settings[key];
+  if (value === undefined) return fallback;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
   console.warn(
     `[pi-retry] Ignoring invalid ${displayKey} value: ${String(value)}`,
   );
@@ -349,6 +381,11 @@ function resolveMainRetryConfig(
       "messageFreeRetries",
       DEFAULT_RETRY_CONFIG.messageFreeRetries,
     ),
+    fallbackModel: readStringSetting(
+      mergedSettings,
+      "fallbackModel",
+      undefined,
+    ),
   };
 }
 
@@ -429,6 +466,12 @@ export function resolvePiRetrySettings(
         "messageFreeRetries",
         main.messageFreeRetries,
         `${PI_RETRY_SETTINGS_KEY}.subagents.messageFreeRetries`,
+      ),
+      fallbackModel: readStringSetting(
+        mergedSubagents,
+        "fallbackModel",
+        main.fallbackModel,
+        `${PI_RETRY_SETTINGS_KEY}.subagents.fallbackModel`,
       ),
       match: {
         systemPromptRegex,
