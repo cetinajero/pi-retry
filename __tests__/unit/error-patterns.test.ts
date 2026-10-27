@@ -604,6 +604,20 @@ describe('nested 429/provider payloads are retryable', () => {
     expect(hasQuotaExhaustedError(msg)).toBe(true);
     expect(hasRetryableError(msg)).toBe(false);
   });
+
+  it('treats retryable Gemini free-tier minute limit as transient 429 instead of permanent quota exhaustion', () => {
+    const msg = {
+      role: 'assistant',
+      stopReason: 'error',
+      error: {
+        message: '{"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit.\\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-3.6-flash, description: Generate content input tokens per minute limit exceeded on Free Tier. See https://ai.google.dev/gemini-api/docs/rate-limits.\\nPlease retry in 44.771345038s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://ai.google.dev/gemini-api/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content input tokens per minute limit exceeded on Free Tier. See https://ai.google.dev/gemini-api/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_input_token_count","quotaId":"GenerateContentInputTokensPerModelPerMinute-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.6-flash"},"quotaValue":"250000"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"44s"}]} }',
+      },
+      content: [],
+    } as unknown as AgentMessage;
+
+    expect(hasQuotaExhaustedError(msg)).toBe(false);
+    expect(hasRetryableError(msg)).toBe(true);
+  });
 });
 
 describe('hasEmptyStop', () => {
