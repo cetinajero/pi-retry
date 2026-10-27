@@ -350,6 +350,15 @@ export function hasQuotaExhaustedError(message: AgentMessage): boolean {
   if (!isAssistantMessage(message)) return false;
   const errorText = getErrorText(message);
   if (message.stopReason !== "error" || !errorText) return false;
+
+  const hasTransient429Signal = /(?:\b429\b|too many requests|rate limit|rate_limited|retry after)/i.test(errorText);
+  const hasHardQuotaSignals = /(?:usage limit.*reset|limit will reset|quota will reset|hour\s+allocated\s+quota|week\s+allocated\s+quota|month\s+allocated\s+quota|free\s+allocated\s+quota|session\s+(?:limit|quota)|out of budget|budget\s+(?:has\s+been\s+)?(?:exceeded|exhausted|limit)|no resource package|premium request allowance|monthly\s+(?:limit|quota|budget|allowance)|usage_limit_reached|insufficient[_\s]quota|exceeded your current quota|free-models-per-day)/i.test(errorText);
+
+  // Many providers wrap a transient 429 inside a JSON string or nested payload.
+  // When the payload is clearly a status=429/rate-limit signal but lacks a hard
+  // reset-cap or budgeting marker, do not classify it as a permanent quota stop.
+  if (hasTransient429Signal && !hasHardQuotaSignals) return false;
+
   return QUOTA_EXHAUSTED_PATTERNS.some(p => p.test(errorText));
 }
 

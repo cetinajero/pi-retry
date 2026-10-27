@@ -590,6 +590,19 @@ describe('nested 429/provider payloads are retryable', () => {
 
     expect(hasRetryableError(msg)).toBe(true);
     expect(hasConnectionError(msg)).toBe(false);
+    expect(hasQuotaExhaustedError(msg)).toBe(false);
+  });
+
+  it('keeps nested 429 quota wording from being treated as permanent quota exhaustion unless it has a hard reset cap', () => {
+    const msg = {
+      role: 'assistant',
+      stopReason: 'error',
+      error: { message: '{\n  "error": {\n    "code": 429,\n    "message": "You exceeded your current quota, please check your plan and billing details"\n  }\n}' },
+      content: [],
+    } as unknown as AgentMessage;
+
+    expect(hasQuotaExhaustedError(msg)).toBe(true);
+    expect(hasRetryableError(msg)).toBe(false);
   });
 });
 
