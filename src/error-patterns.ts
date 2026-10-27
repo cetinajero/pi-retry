@@ -226,24 +226,69 @@ export function isAssistantMessage(message: AgentMessage): message is Extract<Ag
   return message.role === "assistant";
 }
 
+function getErrorText(message: AgentMessage): string | undefined {
+  const record = message as AgentMessage & {
+    errorMessage?: unknown;
+    error?: unknown;
+    statusCode?: unknown;
+    status?: unknown;
+  };
+
+  const direct = typeof record.errorMessage === "string" ? record.errorMessage.trim() : "";
+  if (direct) return direct;
+
+  const nested = record.error;
+  if (typeof nested === "string" && nested.trim()) return nested.trim();
+  if (nested && typeof nested === "object") {
+    const obj = nested as {
+      message?: unknown;
+      detail?: unknown;
+      error?: unknown;
+      description?: unknown;
+      msg?: unknown;
+      statusCode?: unknown;
+      status?: unknown;
+    };
+    for (const candidate of [obj.message, obj.detail, obj.error, obj.description, obj.msg, obj.statusCode, obj.status]) {
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+      if (typeof candidate === "number") return String(candidate);
+      if (candidate && typeof candidate === "object") {
+        const serialized = JSON.stringify(candidate);
+        if (serialized && serialized !== "{}") return serialized;
+      }
+    }
+  }
+
+  const statusCode = typeof record.statusCode === "number" ? String(record.statusCode) : (typeof record.status === "number" ? String(record.status) : undefined);
+  if (statusCode) return statusCode;
+
+  if (typeof record.statusCode === "string" && record.statusCode.trim()) return record.statusCode.trim();
+  if (typeof record.status === "string" && record.status.trim()) return record.status.trim();
+
+  return undefined;
+}
+
 // ── Specific category checks (for diagnostics / messaging) ──
 
 export function has400or413Error(message: AgentMessage): boolean {
   if (!isAssistantMessage(message)) return false;
-  if (message.stopReason !== "error" || !message.errorMessage) return false;
-  return ERROR_400_413_PATTERNS.some(p => p.test(message.errorMessage!));
+  const errorText = getErrorText(message);
+  if (message.stopReason !== "error" || !errorText) return false;
+  return ERROR_400_413_PATTERNS.some(p => p.test(errorText));
 }
 
 export function hasCreditError(message: AgentMessage): boolean {
   if (!isAssistantMessage(message)) return false;
-  if (message.stopReason !== "error" || !message.errorMessage) return false;
-  return CREDIT_ERROR_PATTERNS.some(p => p.test(message.errorMessage!));
+  const errorText = getErrorText(message);
+  if (message.stopReason !== "error" || !errorText) return false;
+  return CREDIT_ERROR_PATTERNS.some(p => p.test(errorText));
 }
 
 export function hasConnectionError(message: AgentMessage): boolean {
   if (!isAssistantMessage(message)) return false;
-  if (message.stopReason !== "error" || !message.errorMessage) return false;
-  return CONNECTION_ERROR_PATTERNS.some(p => p.test(message.errorMessage!));
+  const errorText = getErrorText(message);
+  if (message.stopReason !== "error" || !errorText) return false;
+  return CONNECTION_ERROR_PATTERNS.some(p => p.test(errorText));
 }
 
 /**
@@ -259,9 +304,10 @@ export function hasConnectionError(message: AgentMessage): boolean {
  */
 export function isContextOverflowError(message: AgentMessage): boolean {
   if (!isAssistantMessage(message)) return false;
-  if (message.stopReason !== "error" || !message.errorMessage) return false;
-  if (NON_OVERFLOW_PATTERNS.some(p => p.test(message.errorMessage!))) return false;
-  return OVERFLOW_ERROR_PATTERNS.some(p => p.test(message.errorMessage!));
+  const errorText = getErrorText(message);
+  if (message.stopReason !== "error" || !errorText) return false;
+  if (NON_OVERFLOW_PATTERNS.some(p => p.test(errorText))) return false;
+  return OVERFLOW_ERROR_PATTERNS.some(p => p.test(errorText));
 }
 
 // ── Universal retry check ──
@@ -272,7 +318,8 @@ export function isContextOverflowError(message: AgentMessage): boolean {
  */
 export function hasRetryableError(message: AgentMessage): boolean {
   if (!isAssistantMessage(message)) return false;
-  if (message.stopReason !== "error" || !message.errorMessage) return false;
+  const errorText = getErrorText(message);
+  if (message.stopReason !== "error" || !errorText) return false;
   return !isNonRetryableError(message);
 }
 
@@ -281,10 +328,11 @@ export function hasRetryableError(message: AgentMessage): boolean {
  */
 export function isNonRetryableError(message: AgentMessage): boolean {
   if (!isAssistantMessage(message)) return false;
-  if (message.stopReason !== "error" || !message.errorMessage) return false;
+  const errorText = getErrorText(message);
+  if (message.stopReason !== "error" || !errorText) return false;
   return (
-    NON_RETRYABLE_PATTERNS.some(p => p.test(message.errorMessage!)) ||
-    QUOTA_EXHAUSTED_PATTERNS.some(p => p.test(message.errorMessage!))
+    NON_RETRYABLE_PATTERNS.some(p => p.test(errorText)) ||
+    QUOTA_EXHAUSTED_PATTERNS.some(p => p.test(errorText))
   );
 }
 
@@ -300,8 +348,9 @@ export function isNonRetryableError(message: AgentMessage): boolean {
  */
 export function hasQuotaExhaustedError(message: AgentMessage): boolean {
   if (!isAssistantMessage(message)) return false;
-  if (message.stopReason !== "error" || !message.errorMessage) return false;
-  return QUOTA_EXHAUSTED_PATTERNS.some(p => p.test(message.errorMessage!));
+  const errorText = getErrorText(message);
+  if (message.stopReason !== "error" || !errorText) return false;
+  return QUOTA_EXHAUSTED_PATTERNS.some(p => p.test(errorText));
 }
 
 /**
@@ -311,8 +360,9 @@ export function hasQuotaExhaustedError(message: AgentMessage): boolean {
  */
 export function isSilencedError(message: AgentMessage): boolean {
   if (!isAssistantMessage(message)) return false;
-  if (message.stopReason !== "error" || !message.errorMessage) return false;
-  return SILENCED_PATTERNS.some(p => p.test(message.errorMessage!));
+  const errorText = getErrorText(message);
+  if (message.stopReason !== "error" || !errorText) return false;
+  return SILENCED_PATTERNS.some(p => p.test(errorText));
 }
 
 // ── Categorisation (for UI messages) ──
@@ -324,6 +374,10 @@ export function getErrorCategory(errorMessage: string): '400-413' | 'credit' | '
   if (CONNECTION_ERROR_PATTERNS.some(p => p.test(errorMessage))) return 'connection';
   if (BUILTIN_HANDLED_PATTERNS.some(p => p.test(errorMessage))) return 'builtin';
   return 'other';
+}
+
+export function getNormalizedErrorText(message: AgentMessage): string | undefined {
+  return getErrorText(message);
 }
 
 // ── Max tokens (not an error — continuation) ──

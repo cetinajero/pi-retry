@@ -565,6 +565,34 @@ describe('quota patterns do not false-positive on transient/balance errors', () 
   });
 });
 
+describe('nested 429/provider payloads are retryable', () => {
+  it('reads error.message and statusCode fields when errorMessage is absent', () => {
+    const msg = {
+      role: 'assistant',
+      stopReason: 'error',
+      error: { message: '429 Too Many Requests' },
+      statusCode: 429,
+      content: [],
+    } as unknown as AgentMessage;
+
+    expect(hasRetryableError(msg)).toBe(true);
+    expect(getErrorCategory('429 Too Many Requests')).toBe('builtin');
+    expect(isNonRetryableError(msg)).toBe(false);
+  });
+
+  it('reads nested JSON provider payloads without direct errorMessage', () => {
+    const msg = {
+      role: 'assistant',
+      stopReason: 'error',
+      error: { error: { message: 'HTTP 429: rate limit exceeded' } },
+      content: [],
+    } as unknown as AgentMessage;
+
+    expect(hasRetryableError(msg)).toBe(true);
+    expect(hasConnectionError(msg)).toBe(false);
+  });
+});
+
 describe('hasEmptyStop', () => {
   it('returns true for empty content with stopReason stop', () => {
     const msg = { role: 'assistant', stopReason: 'stop', content: [] } as unknown as AgentMessage;
