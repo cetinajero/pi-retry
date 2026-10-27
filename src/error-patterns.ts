@@ -434,33 +434,25 @@ export function getNormalizedErrorText(message: AgentMessage): string | undefine
 }
 
 export function extractRetryDelayMs(message: string): number | undefined {
-  const text = (message || "").replace(/\\n/g, " ");
-  const patterns = [
-    /(?:please\s+)?retry(?:\s+after)?\s+(?:is\s+)?(?:in\s+)?([\d.]+(?:h|m|s|ms)+)/gi,
-    /retryDelay\s*[:=]\s*["']?([\d.]+(?:h|m|s|ms)+)["']?/gi,
-    /(?:retry\s+after|retry\s+in)\s+([\d.]+(?:h|m|s|ms)+)/gi,
-  ];
+  const text = (message || "").replace(/\s+/g, " ").trim();
+  if (!text) return undefined;
 
-  const durations: number[] = [];
-  for (const pattern of patterns) {
-    const matches = text.matchAll(pattern);
-    for (const match of matches) {
-      const raw = match[1]?.trim();
-      if (!raw) continue;
-      const tokens = raw.match(/[\d.]+(?:ms|s|m|h)/gi) ?? [];
-      let totalMs = 0;
-      for (const token of tokens) {
-        const numeric = Number(token.replace(/(ms|s|m|h)$/i, ""));
-        const unit = token.match(/(ms|s|m|h)$/i)?.[1]?.toLowerCase() ?? "s";
-        const multiplier = unit === "ms" ? 1 : unit === "s" ? 1000 : unit === "m" ? 60_000 : 3_600_000;
-        totalMs += numeric * multiplier;
-      }
-      if (totalMs > 0) durations.push(totalMs);
-    }
-  }
+  const retryWindowStart = text.search(/retry(?:\s+after|\s+in|\s*[:=]|info|delay|able)?/i);
+  const window = retryWindowStart >= 0
+    ? text.slice(Math.max(0, retryWindowStart - 40), retryWindowStart + 220)
+    : text.slice(0, 220);
 
-  if (durations.length === 0) return undefined;
-  return Math.max(...durations);
+  const durationMatches = [...window.matchAll(/(\d+(?:\.\d+)?)\s*(ms|s|m|h)/gi)];
+  if (durationMatches.length === 0) return undefined;
+
+  const totalMs = durationMatches.reduce((sum, match) => {
+    const value = Number(match[1]);
+    const unit = (match[2] || "s").toLowerCase();
+    const multiplier = unit === "ms" ? 1 : unit === "s" ? 1000 : unit === "m" ? 60_000 : 3_600_000;
+    return sum + value * multiplier;
+  }, 0);
+
+  return totalMs > 0 ? totalMs : undefined;
 }
 
 // ── Max tokens (not an error — continuation) ──
