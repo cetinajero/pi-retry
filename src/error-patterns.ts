@@ -226,6 +226,40 @@ export function isAssistantMessage(message: AgentMessage): message is Extract<Ag
   return message.role === "assistant";
 }
 
+function unwrapEmbeddedJsonString(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  let candidate = trimmed;
+  let depth = 0;
+  while ((candidate.startsWith("{") || candidate.startsWith("[")) && depth < 4) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object") {
+        const flatten = (obj: unknown): string[] => {
+          if (!obj || typeof obj !== "object") return [];
+          const record = obj as Record<string, unknown>;
+          const parts: string[] = [];
+          for (const key of ["message", "detail", "description", "error", "msg", "status", "statusCode", "code"]) {
+            const nested = record[key];
+            if (typeof nested === "string") parts.push(nested);
+            else if (typeof nested === "number") parts.push(String(nested));
+            else if (nested && typeof nested === "object") parts.push(...flatten(nested));
+          }
+          return parts;
+        };
+        const flattened = flatten(parsed).filter(Boolean);
+        if (flattened.length > 0) return flattened.join("\n");
+      }
+      break;
+    } catch {
+      break;
+    }
+    depth++;
+    break;
+  }
+  return candidate;
+}
+
 function getErrorText(message: AgentMessage): string | undefined {
   const record = message as AgentMessage & {
     errorMessage?: unknown;
@@ -235,10 +269,10 @@ function getErrorText(message: AgentMessage): string | undefined {
   };
 
   const direct = typeof record.errorMessage === "string" ? record.errorMessage.trim() : "";
-  if (direct) return direct;
+  if (direct) return unwrapEmbeddedJsonString(direct);
 
   const nested = record.error;
-  if (typeof nested === "string" && nested.trim()) return nested.trim();
+  if (typeof nested === "string" && nested.trim()) return unwrapEmbeddedJsonString(nested.trim());
   if (nested && typeof nested === "object") {
     const obj = nested as {
       message?: unknown;
@@ -250,11 +284,11 @@ function getErrorText(message: AgentMessage): string | undefined {
       status?: unknown;
     };
     for (const candidate of [obj.message, obj.detail, obj.error, obj.description, obj.msg, obj.statusCode, obj.status]) {
-      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+      if (typeof candidate === "string" && candidate.trim()) return unwrapEmbeddedJsonString(candidate.trim());
       if (typeof candidate === "number") return String(candidate);
       if (candidate && typeof candidate === "object") {
         const serialized = JSON.stringify(candidate);
-        if (serialized && serialized !== "{}") return serialized;
+        if (serialized && serialized !== "{}") return unwrapEmbeddedJsonString(serialized);
       }
     }
   }
