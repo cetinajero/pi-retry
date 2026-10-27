@@ -433,6 +433,36 @@ export function getNormalizedErrorText(message: AgentMessage): string | undefine
   return getErrorText(message);
 }
 
+export function extractRetryDelayMs(message: string): number | undefined {
+  const text = (message || "").replace(/\\n/g, " ");
+  const patterns = [
+    /(?:please\s+)?retry(?:\s+after)?\s+(?:is\s+)?(?:in\s+)?([\d.]+(?:h|m|s|ms)+)/gi,
+    /retryDelay\s*[:=]\s*["']?([\d.]+(?:h|m|s|ms)+)["']?/gi,
+    /(?:retry\s+after|retry\s+in)\s+([\d.]+(?:h|m|s|ms)+)/gi,
+  ];
+
+  const durations: number[] = [];
+  for (const pattern of patterns) {
+    const matches = text.matchAll(pattern);
+    for (const match of matches) {
+      const raw = match[1]?.trim();
+      if (!raw) continue;
+      const tokens = raw.match(/[\d.]+(?:ms|s|m|h)/gi) ?? [];
+      let totalMs = 0;
+      for (const token of tokens) {
+        const numeric = Number(token.replace(/(ms|s|m|h)$/i, ""));
+        const unit = token.match(/(ms|s|m|h)$/i)?.[1]?.toLowerCase() ?? "s";
+        const multiplier = unit === "ms" ? 1 : unit === "s" ? 1000 : unit === "m" ? 60_000 : 3_600_000;
+        totalMs += numeric * multiplier;
+      }
+      if (totalMs > 0) durations.push(totalMs);
+    }
+  }
+
+  if (durations.length === 0) return undefined;
+  return Math.max(...durations);
+}
+
 // ── Max tokens (not an error — continuation) ──
 
 export function hasMaxTokensStop(message: AgentMessage): boolean {

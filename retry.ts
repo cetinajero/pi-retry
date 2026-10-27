@@ -14,6 +14,7 @@ import {
   isContextOverflowError,
   isAssistantMessage,
   getLastAssistantMessage,
+  extractRetryDelayMs,
   calculateDelay,
   DEFAULT_RETRY_CONFIG,
   loadPiRetrySettings,
@@ -1007,6 +1008,17 @@ export default function (pi: ExtensionAPI) {
           didRetryComplete = true;
           return;
         }
+
+        // Capture the explicit retry delay before stripping the failed assistant
+        // message out of the canonical session journal. Once the error is omitted,
+        // the retry loop can no longer read the provider's "Please retry in ..." /
+        // RetryInfo window and falls back to the default exponential backoff.
+        const providerDelayMs = hiddenTurnKind === "retry"
+          ? extractRetryDelayMs(getLastAssistantMessage(sessionManager && typeof (sessionManager as { getEntries?: () => unknown[] }).getEntries === "function"
+            ? (sessionManager as { getEntries: () => unknown[] }).getEntries()
+            : [])?.errorMessage ?? "")
+          : undefined;
+
         removeErrorFromRetryContext(sessionManager, myAgent);
 
         // Empty-stop cap: a model that produced no usable output and answers
@@ -1034,7 +1046,9 @@ export default function (pi: ExtensionAPI) {
         const delayAttempt = hiddenTurnKind === "retry"
           ? ++retryAttempt
           : Math.max(1, retryAttempt + 1);
-        const delay = calculateDelay(delayAttempt, retryConfig);
+        const delay = providerDelayMs !== undefined
+          ? Math.min(providerDelayMs, retryConfig.maxDelayMs)
+          : calculateDelay(delayAttempt, retryConfig);
         const isMaxDelay = delay >= retryConfig.maxDelayMs;
         if (hiddenTurnKind === "retry" && isMaxDelay) {
           maxDelayRetries++;
