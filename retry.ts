@@ -632,7 +632,20 @@ export default function (pi: ExtensionAPI) {
     description: "Unified retry controls: /retry (manual trigger), /retry status (diagnostics), /retry reset (clear state), /retry fallback-model <model>",
     handler: async (args, ctx) => {
       const binding = getRetrySession(ctx.sessionManager);
-      const subcommand = args[0]?.toLowerCase();
+      const subcommand = (
+        Array.isArray(args)
+          ? args[0]
+          : typeof args === "string"
+            ? args.trim().split(/\s+/)[0]
+            : ""
+      )?.toLowerCase();
+
+      const subcommandArgs = Array.isArray(args)
+        ? args.slice(1).join(" ").trim()
+        : typeof args === "string"
+          ? args.trim().split(/\s+/).slice(1).join(" ").trim()
+          : "";
+
       const bindOwnerMismatch = !!binding && binding.owner !== owner;
       if (bindOwnerMismatch && subcommand !== "status" && subcommand !== "reset") return;
       if (binding?.isChild) {
@@ -660,7 +673,7 @@ export default function (pi: ExtensionAPI) {
 
       // /retry fallback-model [<model>|clear]
       if (subcommand === "fallback-model") {
-        const modelArg = args.slice(1).join(" ").trim();
+        const modelArg = subcommandArgs;
         if (modelArg) {
           if (modelArg.toLowerCase() === "clear" || modelArg.toLowerCase() === "none") {
             retryConfig.fallbackModel = undefined;
